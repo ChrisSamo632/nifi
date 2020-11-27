@@ -73,10 +73,12 @@ class PutElasticsearchRecordTest {
         runner.addControllerService("reader", reader)
         runner.addControllerService("clientService", clientService)
         runner.setProperty(reader, SchemaAccessUtils.SCHEMA_REGISTRY, "registry")
+        runner.setProperty(reader, SchemaAccessUtils.SCHEMA_ACCESS_STRATEGY, SchemaAccessUtils.SCHEMA_NAME_PROPERTY)
         runner.setProperty(PutElasticsearchRecord.RECORD_READER, "reader")
         runner.setProperty(PutElasticsearchRecord.INDEX_OP, "index")
         runner.setProperty(PutElasticsearchRecord.INDEX, "test_index")
         runner.setProperty(PutElasticsearchRecord.TYPE, "test_type")
+        runner.setProperty(PutElasticsearchRecord.AT_TIMESTAMP, "test_timestamp")
         runner.setProperty(PutElasticsearchRecord.CLIENT_SERVICE, "clientService")
         runner.enableControllerService(registry)
         runner.enableControllerService(reader)
@@ -127,14 +129,19 @@ class PutElasticsearchRecordTest {
             name: "RecordPathTestType",
             fields: [
                 [ name: "id", type: "string" ],
+                [ name: "op", type: "string" ],
                 [ name: "index", type: "string" ],
                 [ name: "type", type: "string" ],
-                [ name: "msg", type: ["null", "string"] ]
+                [ name: "msg", type: ["null", "string"] ],
+                [ name: "ts", type: [ type: "long", logicalType: "timestamp-millis" ] ],
+                [ name: "date", type: [ type: "int", logicalType: "date" ] ],
+                [ name: "time", type: [ type: "int", logicalType: "time-millis" ] ],
+                [ name: "code", type: "long" ]
             ]
         ]))
 
         def flowFileContents = prettyPrint(toJson([
-            [ id: "rec-1", op: "index", index: "bulk_a", type: "message", msg: "Hello" ],
+            [ id: "rec-1", op: "index", index: "bulk_a", type: "message", msg: "Hello", ts: 1606492403000L ],
             [ id: "rec-2", op: "index", index: "bulk_b", type: "message", msg: "Hello" ],
             [ id: "rec-3", op: "index", index: "bulk_a", type: "message", msg: "Hello" ],
             [ id: "rec-4", op: "index", index: "bulk_b", type: "message", msg: "Hello" ],
@@ -143,13 +150,17 @@ class PutElasticsearchRecordTest {
         ]))
 
         def evalClosure = { List<IndexOperationRequest> items ->
-            def a = items.findAll { it.index == "bulk_a" }.size()
-            def b = items.findAll { it.index == "bulk_b" }.size()
+            int a = items.findAll { it.index == "bulk_a" }.size()
+            int b = items.findAll { it.index == "bulk_b" }.size()
             int index = items.findAll { it.operation == IndexOperationRequest.Operation.Index }.size()
             int create = items.findAll { it.operation == IndexOperationRequest.Operation.Create }.size()
             int msg = items.findAll { ("Hello" == it.fields.get("msg")) }.size()
             int empties = items.findAll { ("" == it.fields.get("msg")) }.size()
             int nulls = items.findAll { (null == it.fields.get("msg")) }.size()
+            int timestamp = items.findAll { it.fields.get("@timestamp") == "2020-11-27 15:53:23" }.size()
+            int timestampDefault = items.findAll { it.fields.get("@timestamp") == "test_timestamp" }.size()
+            int ts = items.findAll { it.fields.get("ts") != null }.size()
+            int id = items.findAll { it.fields.get("id") != null }.size()
             items.each {
                 Assert.assertNotNull(it.id)
                 Assert.assertTrue(it.id.startsWith("rec-"))
@@ -162,6 +173,10 @@ class PutElasticsearchRecordTest {
             Assert.assertEquals(4, msg)
             Assert.assertEquals(1, empties)
             Assert.assertEquals(1, nulls)
+            Assert.assertEquals(1, timestamp)
+            Assert.assertEquals(5, timestampDefault)
+            Assert.assertEquals(0, ts)
+            Assert.assertEquals(0, id)
         }
 
         clientService.evalClosure = evalClosure
@@ -173,6 +188,7 @@ class PutElasticsearchRecordTest {
         runner.setProperty(PutElasticsearchRecord.ID_RECORD_PATH, "/id")
         runner.setProperty(PutElasticsearchRecord.INDEX_RECORD_PATH, "/index")
         runner.setProperty(PutElasticsearchRecord.TYPE_RECORD_PATH, "/type")
+        runner.setProperty(PutElasticsearchRecord.AT_TIMESTAMP_RECORD_PATH, "/ts")
         runner.enqueue(flowFileContents, [
             "schema.name": "recordPathTest"
         ])
@@ -185,7 +201,7 @@ class PutElasticsearchRecordTest {
         runner.clearTransferState()
 
         flowFileContents = prettyPrint(toJson([
-            [ id: "rec-1", op: null, index: null, type: null, msg: "Hello" ],
+            [ id: "rec-1", op: null, index: null, type: null, msg: "Hello", date: 1606492403000L ],
             [ id: "rec-2", op: null, index: null, type: null, msg: "Hello" ],
             [ id: "rec-3", op: null, index: null, type: null, msg: "Hello" ],
             [ id: "rec-4", op: null, index: null, type: null, msg: "Hello" ],
@@ -199,15 +215,28 @@ class PutElasticsearchRecordTest {
             def testIndexCount = items.findAll { it.index == "test_index" }.size()
             def bulkIndexCount = items.findAll { it.index.startsWith("bulk_") }.size()
             def indexOperationCount = items.findAll { it.operation == IndexOperationRequest.Operation.Index }.size()
+            def timestampCount = items.findAll { it.fields.get("@timestamp") == "27/11/2020" }.size()
+            def noTimestampCount = items.findAll { it.fields.get("@timestamp") == null }.size()
+            int dateCount = items.findAll { it.fields.get("date") != null }.size()
+            def idCount = items.findAll { it.fields.get("id") != null }.size()
             Assert.assertEquals(5, testTypeCount)
             Assert.assertEquals(1, messageTypeCount)
             Assert.assertEquals(5, testIndexCount)
             Assert.assertEquals(1, bulkIndexCount)
             Assert.assertEquals(6, indexOperationCount)
+            Assert.assertEquals(1, timestampCount)
+            Assert.assertEquals(5, noTimestampCount)
+            Assert.assertEquals(1, dateCount)
+            Assert.assertEquals(6, idCount)
         }
 
         clientService.evalClosure = evalClosure
 
+        runner.setProperty(PutElasticsearchRecord.RETAIN_ID_FIELD, "true")
+        runner.removeProperty(PutElasticsearchRecord.AT_TIMESTAMP)
+        runner.setProperty(PutElasticsearchRecord.AT_TIMESTAMP_RECORD_PATH, "/date")
+        runner.setProperty(PutElasticsearchRecord.AT_TIMESTAMP_DATE_FORMAT, "dd/MM/yyyy")
+        runner.setProperty(PutElasticsearchRecord.RETAIN_AT_TIMESTAMP_FIELD, "true")
         runner.setProperty(PutElasticsearchRecord.INDEX_OP, "index")
         runner.enqueue(flowFileContents, [
             "schema.name": "recordPathTest"
@@ -225,7 +254,7 @@ class PutElasticsearchRecordTest {
                 [ id: "rec-3", msg: "Hello" ],
                 [ id: "rec-4", msg: "Hello" ],
                 [ id: "rec-5", msg: "Hello" ],
-                [ id: "rec-6", type: "message", msg: "Hello" ]
+                [ id: "rec-6", type: "message", msg: "Hello", time: 492403 ]
         ]))
 
         evalClosure = { List<IndexOperationRequest> items ->
@@ -233,14 +262,17 @@ class PutElasticsearchRecordTest {
             def messageTypeCount = items.findAll { it.type == "message" }.size()
             def nullIdCount = items.findAll { it.id == null }.size()
             def recIdCount = items.findAll { StringUtils.startsWith(it.id, "rec-") }.size()
+            def timestampCount = items.findAll { it.fields.get("@timestamp") == "00:08:12" }.size()
             Assert.assertEquals("null type", 5, nullTypeCount)
             Assert.assertEquals("message type", 1, messageTypeCount)
             Assert.assertEquals("null id", 2, nullIdCount)
             Assert.assertEquals("rec- id", 4, recIdCount)
+            Assert.assertEquals("@timestamp", 1, timestampCount)
         }
 
         clientService.evalClosure = evalClosure
 
+        runner.setProperty(PutElasticsearchRecord.AT_TIMESTAMP_RECORD_PATH, "/time")
         runner.removeProperty(PutElasticsearchRecord.TYPE)
         runner.enqueue(flowFileContents, [
                 "schema.name": "recordPathTest"
@@ -258,7 +290,7 @@ class PutElasticsearchRecordTest {
             [ id: "rec-3", op: "update", index: "bulk_a", type: "message", msg: "Hello" ],
             [ id: "rec-4", op: "upsert", index: "bulk_b", type: "message", msg: "Hello" ],
             [ id: "rec-5", op: "create", index: "bulk_a", type: "message", msg: "Hello" ],
-            [ id: "rec-6", op: "delete", index: "bulk_b", type: "message", msg: "Hello" ]
+            [ id: "rec-6", op: "delete", index: "bulk_b", type: "message", msg: "Hello", code: 101L ]
         ]))
 
         clientService.evalClosure = { List<IndexOperationRequest> items ->
@@ -267,15 +299,38 @@ class PutElasticsearchRecordTest {
             int update = items.findAll { it.operation == IndexOperationRequest.Operation.Update }.size()
             int upsert = items.findAll { it.operation == IndexOperationRequest.Operation.Upsert }.size()
             int delete = items.findAll { it.operation == IndexOperationRequest.Operation.Delete }.size()
+            def timestampCount = items.findAll { it.fields.get("@timestamp") == 101L }.size()
             Assert.assertEquals(1, index)
             Assert.assertEquals(2, create)
             Assert.assertEquals(1, update)
             Assert.assertEquals(1, upsert)
             Assert.assertEquals(1, delete)
+            Assert.assertEquals(1, timestampCount)
         }
 
+        runner.setProperty(PutElasticsearchRecord.AT_TIMESTAMP_RECORD_PATH, "/code")
         runner.enqueue(flowFileContents, [
             "schema.name": "recordPathTest"
+        ])
+        runner.run()
+        runner.assertTransferCount(PutElasticsearchRecord.REL_SUCCESS, 1)
+        runner.assertTransferCount(PutElasticsearchRecord.REL_FAILURE, 0)
+        runner.assertTransferCount(PutElasticsearchRecord.REL_RETRY, 0)
+
+        runner.clearTransferState()
+
+        flowFileContents = prettyPrint(toJson([
+                [ id: "rec-1", op: "index", index: "bulk_a", type: "message", msg: "Hello" ]
+        ]))
+
+        clientService.evalClosure = { List<IndexOperationRequest> items ->
+            def timestampCount = items.findAll { it.fields.get("@timestamp") == "Hello" }.size()
+            Assert.assertEquals(1, timestampCount)
+        }
+
+        runner.setProperty(PutElasticsearchRecord.AT_TIMESTAMP_RECORD_PATH, "/msg")
+        runner.enqueue(flowFileContents, [
+                "schema.name": "recordPathTest"
         ])
         runner.run()
         runner.assertTransferCount(PutElasticsearchRecord.REL_SUCCESS, 1)

@@ -25,11 +25,11 @@ import java.util.Map;
  * covers all CRUD-related operations that can be executed against an Elasticsearch index with documents.
  */
 public class IndexOperationRequest {
-    private String index;
-    private String type;
-    private String id;
-    private Map<String, Object> fields;
-    private Operation operation;
+    private final String index;
+    private final String type;
+    private final String id;
+    private final Map<String, Object> fields;
+    private final Operation operation;
 
     public IndexOperationRequest(String index, String type, String id, Map<String, Object> fields, Operation operation) {
         this.index = index;
@@ -65,7 +65,7 @@ public class IndexOperationRequest {
         Index("index"),
         Update("update"),
         Upsert("upsert");
-        String value;
+        private final String value;
 
         Operation(String value) {
             this.value = value;
@@ -79,6 +79,10 @@ public class IndexOperationRequest {
             return Arrays.stream(Operation.values())
                     .filter(o -> o.getValue().equalsIgnoreCase(value)).findFirst()
                     .orElseThrow(() -> new IllegalArgumentException(String.format("Unknown Index Operation %s", value)));
+        }
+
+        public static String[] allValues() {
+            return Arrays.stream(Operation.values()).map(Operation::getValue).sorted().toArray(String[]::new);
         }
     }
 }
