@@ -17,6 +17,8 @@
 
 package org.apache.nifi.elasticsearch.integration
 
+import groovy.json.JsonSlurper
+import org.apache.maven.artifact.versioning.ComparableVersion
 import org.apache.nifi.elasticsearch.DeleteOperationResponse
 import org.apache.nifi.elasticsearch.ElasticSearchClientService
 import org.apache.nifi.elasticsearch.ElasticSearchClientServiceImpl
@@ -30,19 +32,35 @@ import org.apache.nifi.util.TestRunner
 import org.apache.nifi.util.TestRunners
 import org.junit.After
 import org.junit.Assert
+import org.junit.Assume
 import org.junit.Before
+import org.junit.BeforeClass
 import org.junit.Test
 
 import static groovy.json.JsonOutput.prettyPrint
 import static groovy.json.JsonOutput.toJson
+import static org.hamcrest.CoreMatchers.is
 
 class ElasticSearch5ClientService_IT {
-
     private TestRunner runner
     private ElasticSearchClientServiceImpl service
 
-    static String INDEX = "messages"
-    static String TYPE  = StringUtils.isNotBlank(System.getProperty("type_name")) ? System.getProperty("type_name") : null;
+    static final String INDEX = "messages"
+    static final String TYPE  = StringUtils.isBlank(System.getProperty("type_name")) ? null : System.getProperty("type_name")
+
+    static final ComparableVersion VERSION = new ComparableVersion(System.getProperty("es_version"))
+    static final ComparableVersion ES_7_10 = new ComparableVersion("7.10")
+
+    static final String FLAVOUR = System.getProperty("es_flavour")
+    static final String DEFAULT = "default"
+
+    @BeforeClass
+    static void beforeAll() throws Exception {
+        System.out.println(
+                String.format("%n%n%n%n%n%n%n%n%n%n%n%n%n%n%nTYPE: %s%nVERSION: %s%nFLAVOUR %s%n%n%n%n%n%n%n%n%n%n%n%n%n%n%n",
+                        TYPE, VERSION, FLAVOUR)
+        )
+    }
 
     @Before
     void before() throws Exception {
@@ -85,7 +103,7 @@ class ElasticSearch5ClientService_IT {
         ]))
         
         
-        SearchResponse response = service.search(query, "messages", TYPE)
+        SearchResponse response = service.search(query, INDEX, TYPE, null)
         Assert.assertNotNull("Response was null", response)
 
         Assert.assertEquals("Wrong count", 15, response.numberOfHits)
@@ -94,8 +112,11 @@ class ElasticSearch5ClientService_IT {
         Assert.assertEquals("Wrong number of hits", 10, response.hits.size())
         Assert.assertNotNull("Aggregations are missing", response.aggregations)
         Assert.assertEquals("Aggregation count is wrong", 1, response.aggregations.size())
+        Assert.assertNull("Unexpected ScrollId", response.scrollId)
+        Assert.assertNull("Unexpected Search_After", response.searchAfter)
+        Assert.assertNull("Unexpected pitId", response.pitId)
 
-        Map termCounts = response.aggregations.get("term_counts")
+        Map termCounts = response.aggregations.get("term_counts") as Map
         Assert.assertNotNull("Term counts was missing", termCounts)
         def buckets = termCounts.get("buckets")
         Assert.assertNotNull("Buckets branch was empty", buckets)
@@ -110,8 +131,166 @@ class ElasticSearch5ClientService_IT {
         buckets.each { aggRes ->
             def key = aggRes["key"]
             def docCount = aggRes["doc_count"]
-            Assert.assertEquals("${key} did not match.", expected[key], docCount)
+            Assert.assertEquals("${key} did not match.", expected[key as String], docCount)
         }
+    }
+
+    @Test
+    void testScroll() {
+        final String query = prettyPrint(toJson([
+                size: 2,
+                query: [ match_all: [:] ],
+                aggs: [ term_counts: [ terms: [ field: "msg", size: 5 ] ] ]
+        ]))
+
+        // initiate the scroll
+        final SearchResponse response = service.search(query, INDEX, TYPE, Collections.singletonMap("scroll", "10s"))
+        Assert.assertNotNull("Response was null", response)
+
+        Assert.assertEquals("Wrong count", 15, response.numberOfHits)
+        Assert.assertFalse("Timed out", response.isTimedOut())
+        Assert.assertNotNull("Hits was null", response.getHits())
+        Assert.assertEquals("Wrong number of hits", 2, response.hits.size())
+        Assert.assertNotNull("Aggregations are missing", response.aggregations)
+        Assert.assertEquals("Aggregation count is wrong", 1, response.aggregations.size())
+        Assert.assertNotNull("ScrollId missing", response.scrollId)
+        Assert.assertNull("Unexpected Search_After", response.searchAfter)
+        Assert.assertNull("Unexpected pitId", response.pitId)
+
+        final Map termCounts = response.aggregations.get("term_counts") as Map
+        Assert.assertNotNull("Term counts was missing", termCounts)
+        Assert.assertEquals("Buckets count is wrong", 5, (termCounts.get("buckets") as List).size())
+
+        // scroll the next page
+        final SearchResponse scrollResponse = service.scroll(prettyPrint((toJson([scroll_id: response.scrollId, scroll: "10s"]))))
+        Assert.assertNotNull("Scroll Response was null", scrollResponse)
+
+        Assert.assertEquals("Wrong count", 15, scrollResponse.numberOfHits)
+        Assert.assertFalse("Timed out", scrollResponse.isTimedOut())
+        Assert.assertNotNull("Hits was null", scrollResponse.getHits())
+        Assert.assertEquals("Wrong number of hits", 2, scrollResponse.hits.size())
+        Assert.assertNotNull("Aggregations missing", scrollResponse.aggregations)
+        Assert.assertEquals("Aggregation count is wrong", 0, scrollResponse.aggregations.size())
+        Assert.assertNotNull("ScrollId missing", scrollResponse.scrollId)
+        Assert.assertNull("Unexpected Search_After", scrollResponse.searchAfter)
+        Assert.assertNull("Unexpected pitId", scrollResponse.pitId)
+
+        Assert.assertNotEquals("Same results", scrollResponse.hits, response.hits)
+
+        // delete the scroll
+        final DeleteOperationResponse deleteResponse = service.deleteScroll(scrollResponse.scrollId)
+        Assert.assertNotNull("Delete Response was null", deleteResponse)
+
+        Assert.assertTrue(deleteResponse.took > 0)
+    }
+
+    @Test
+    void testSearchAfter() {
+        final Map<String, Object> queryMap = [
+                size: 2,
+                query: [ match_all: [:] ],
+                aggs: [ term_counts: [ terms: [ field: "msg", size: 5 ] ] ],
+                sort: [[ msg: "desc" ]]
+        ]
+        final String query = prettyPrint(toJson(queryMap))
+
+        // search first page
+        final SearchResponse response = service.search(query, INDEX, TYPE, null)
+        Assert.assertNotNull("Response was null", response)
+
+        Assert.assertEquals("Wrong count", 15, response.numberOfHits)
+        Assert.assertFalse("Timed out", response.isTimedOut())
+        Assert.assertNotNull("Hits was null", response.getHits())
+        Assert.assertEquals("Wrong number of hits", 2, response.hits.size())
+        Assert.assertNotNull("Aggregations missing", response.aggregations)
+        Assert.assertEquals("Aggregation count is wrong", 1, response.aggregations.size())
+        Assert.assertNull("Unexpected ScrollId", response.scrollId)
+        Assert.assertNotNull("Search_After missing", response.searchAfter)
+        Assert.assertNull("Unexpected pitId", response.pitId)
+
+        final Map termCounts = response.aggregations.get("term_counts") as Map
+        Assert.assertNotNull("Term counts was missing", termCounts)
+        Assert.assertEquals("Buckets count is wrong", 5, (termCounts.get("buckets") as List).size())
+
+        // search the next page
+        queryMap.search_after = new JsonSlurper().parseText(response.searchAfter) as Serializable
+        queryMap.remove("aggs")
+        final String secondPage = prettyPrint(toJson(queryMap))
+        final SearchResponse secondResponse = service.search(secondPage, INDEX, TYPE, null)
+        Assert.assertNotNull("Second Response was null", secondResponse)
+
+        Assert.assertEquals("Wrong count", 15, secondResponse.numberOfHits)
+        Assert.assertFalse("Timed out", secondResponse.isTimedOut())
+        Assert.assertNotNull("Hits was null", secondResponse.getHits())
+        Assert.assertEquals("Wrong number of hits", 2, secondResponse.hits.size())
+        Assert.assertNotNull("Aggregations missing", secondResponse.aggregations)
+        Assert.assertEquals("Aggregation count is wrong", 0, secondResponse.aggregations.size())
+        Assert.assertNull("Unexpected ScrollId", secondResponse.scrollId)
+        Assert.assertNotNull("Unexpected Search_After", secondResponse.searchAfter)
+        Assert.assertNull("Unexpected pitId", secondResponse.pitId)
+
+        Assert.assertNotEquals("Same results", secondResponse.hits, response.hits)
+    }
+
+    @Test
+    void testPointInTime() {
+        Assume.assumeTrue("Requires version 7.10+", VERSION >= ES_7_10)
+        Assume.assumeThat("Requires XPack features", FLAVOUR, is(DEFAULT))
+
+        // initialise
+        final String pitId = service.initialisePointInTime(INDEX, null)
+
+        final Map<String, Object> queryMap = [
+                size: 2,
+                query: [ match_all: [:] ],
+                aggs: [ term_counts: [ terms: [ field: "msg", size: 5 ] ] ],
+                sort: [[ msg: "desc" ]],
+                pit: [ id: pitId, keep_alive: "10s" ]
+        ]
+        final String query = prettyPrint(toJson(queryMap))
+
+        // search first page
+        final SearchResponse response = service.search(query, null, TYPE, null)
+        Assert.assertNotNull("Response was null", response)
+
+        Assert.assertEquals("Wrong count", 15, response.numberOfHits)
+        Assert.assertFalse("Timed out", response.isTimedOut())
+        Assert.assertNotNull("Hits was null", response.getHits())
+        Assert.assertEquals("Wrong number of hits", 2, response.hits.size())
+        Assert.assertNotNull("Aggregations missing", response.aggregations)
+        Assert.assertEquals("Aggregation count is wrong", 1, response.aggregations.size())
+        Assert.assertNull("Unexpected ScrollId", response.scrollId)
+        Assert.assertNull("Unexpected Search_After", response.searchAfter)
+        Assert.assertNotNull("pitId missing", response.pitId)
+
+        final Map termCounts = response.aggregations.get("term_counts") as Map
+        Assert.assertNotNull("Term counts was missing", termCounts)
+        Assert.assertEquals("Buckets count is wrong", 5, (termCounts.get("buckets") as List).size())
+
+        // search the next page
+        queryMap.search_after = new JsonSlurper().parseText(response.searchAfter) as Serializable
+        queryMap.remove("aggs")
+        final String secondPage = prettyPrint(toJson(queryMap))
+        final SearchResponse secondResponse = service.search(secondPage, null, TYPE, null)
+        Assert.assertNotNull("Second Response was null", secondResponse)
+
+        Assert.assertEquals("Wrong count", 15, secondResponse.numberOfHits)
+        Assert.assertFalse("Timed out", secondResponse.isTimedOut())
+        Assert.assertNotNull("Hits was null", secondResponse.getHits())
+        Assert.assertEquals("Wrong number of hits", 2, secondResponse.hits.size())
+        Assert.assertNotNull("Aggregations missing", secondResponse.aggregations)
+        Assert.assertEquals("Aggregation count is wrong", 0, secondResponse.aggregations.size())
+        Assert.assertNull("Unexpected ScrollId", secondResponse.scrollId)
+        Assert.assertNull("Unexpected Search_After", secondResponse.searchAfter)
+        Assert.assertNotNull("pitId missing", secondResponse.pitId)
+
+        Assert.assertNotEquals("Same results", secondResponse.hits, response.hits)
+
+        // delete pitId
+        final DeleteOperationResponse deleteResponse = service.deletePointInTime(pitId)
+        Assert.assertNotNull("Delete Response was null", deleteResponse)
+
+        Assert.assertTrue(deleteResponse.took > 0)
     }
 
     @Test
@@ -131,6 +310,7 @@ class ElasticSearch5ClientService_IT {
     @Test
     void testDeleteById() throws Exception {
         final String ID = "1"
+        final def originalDoc = service.get(INDEX, TYPE, ID)
         DeleteOperationResponse response = service.deleteById(INDEX, TYPE, ID)
         Assert.assertNotNull(response)
         Assert.assertTrue(response.getTook() > 0)
@@ -138,12 +318,15 @@ class ElasticSearch5ClientService_IT {
         Assert.assertNull(doc)
         doc = service.get(INDEX, TYPE, "2")
         Assert.assertNotNull(doc)
+
+        // replace the deleted doc
+        service.add(new IndexOperationRequest(INDEX, TYPE, "1", originalDoc, IndexOperationRequest.Operation.Index))
+        waitForIndexRefresh() // (affects later tests using _search or _bulk)
     }
 
     @Test
     void testGet() throws IOException {
         Map old
-        System.out.println("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" + "TYPE: " + TYPE + "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n")
         1.upto(15) { index ->
             String id = String.valueOf(index)
             def doc = service.get(INDEX, TYPE, id)
@@ -194,7 +377,7 @@ class ElasticSearch5ClientService_IT {
         IndexOperationResponse response = service.bulk([new IndexOperationRequest("nulls", TYPE, "1", doc, IndexOperationRequest.Operation.Index)])
         Assert.assertNotNull(response)
         Assert.assertTrue(response.getTook() > 0)
-        Thread.sleep(2000)
+        waitForIndexRefresh()
 
         Map<String, Object> result = service.get("nulls", TYPE, "1")
         Assert.assertEquals(doc, result)
@@ -204,7 +387,7 @@ class ElasticSearch5ClientService_IT {
         response = service.bulk([new IndexOperationRequest("nulls", TYPE, "2", doc, IndexOperationRequest.Operation.Index)])
         Assert.assertNotNull(response)
         Assert.assertTrue(response.getTook() > 0)
-        Thread.sleep(2000)
+        waitForIndexRefresh()
 
         result = service.get("nulls", TYPE, "2")
         Assert.assertTrue("Non-nulls (present): " + result.toString(), result.keySet().containsAll(["msg", "is_blank"]))
@@ -239,7 +422,7 @@ class ElasticSearch5ClientService_IT {
         IndexOperationResponse response = service.bulk(payload)
         Assert.assertNotNull(response)
         Assert.assertTrue(response.getTook() > 0)
-        Thread.sleep(2000)
+        waitForIndexRefresh()
 
         /*
          * Now, check to ensure that both indexes got populated appropriately.
@@ -296,7 +479,8 @@ class ElasticSearch5ClientService_IT {
         List<IndexOperationRequest> deletes = new ArrayList<>()
         deletes.add(new IndexOperationRequest(INDEX, TYPE, TEST_ID, null, IndexOperationRequest.Operation.Delete))
         deletes.add(new IndexOperationRequest(INDEX, TYPE, UPSERTED_ID, null, IndexOperationRequest.Operation.Delete))
-        service.bulk(deletes)
+        Assert.assertFalse(service.bulk(deletes).hasErrors())
+        waitForIndexRefresh() // wait 1s for index refresh (doesn't prevent GET but affects later tests using _search or _bulk)
         Assert.assertNull(service.get(INDEX, TYPE, TEST_ID))
         Assert.assertNull(service.get(INDEX, TYPE, UPSERTED_ID))
     }
@@ -314,5 +498,9 @@ class ElasticSearch5ClientService_IT {
             def key = it.keySet().stream().findFirst().get()
             it[key].containsKey("error")
         }.size() == 2
+    }
+
+    private static void waitForIndexRefresh() {
+        Thread.sleep(1000)
     }
 }
