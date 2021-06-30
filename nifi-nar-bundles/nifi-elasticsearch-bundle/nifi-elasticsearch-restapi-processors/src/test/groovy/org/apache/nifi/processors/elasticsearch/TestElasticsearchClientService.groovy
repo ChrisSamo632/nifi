@@ -24,65 +24,79 @@ import org.apache.nifi.elasticsearch.ElasticSearchClientService
 import org.apache.nifi.elasticsearch.IndexOperationRequest
 import org.apache.nifi.elasticsearch.IndexOperationResponse
 import org.apache.nifi.elasticsearch.SearchResponse
+import org.apache.nifi.elasticsearch.UpdateOperationResponse
 
 class TestElasticsearchClientService extends AbstractControllerService implements ElasticSearchClientService {
     private boolean returnAggs
     private boolean throwErrorInSearch
     private boolean throwErrorInDelete
+    private boolean throwErrorInUpdate
+    private Map<String, String> requestParameters
 
     TestElasticsearchClientService(boolean returnAggs) {
         this.returnAggs = returnAggs
     }
 
-    @Override
-    IndexOperationResponse add(IndexOperationRequest operation) {
-        return add(Arrays.asList(operation))
+    private void common(boolean throwError, Map<String, String> requestParameters) {
+        if (throwError) {
+            throw new IOException("Simulated IOException")
+        }
+        this.requestParameters = requestParameters
     }
 
     @Override
-    IndexOperationResponse bulk(List<IndexOperationRequest> operations) {
-        return new IndexOperationResponse(100L, 100L)
+    IndexOperationResponse add(IndexOperationRequest operation, Map<String, String> requestParameters) {
+        return bulk(Arrays.asList(operation), requestParameters)
     }
 
     @Override
-    Long count(String query, String index, String type) {
+    IndexOperationResponse bulk(List<IndexOperationRequest> operations, Map<String, String> requestParameters) {
+        common(false, requestParameters)
+        return new IndexOperationResponse(100L)
+    }
+
+    @Override
+    Long count(String query, String index, String type, Map<String, String> requestParameters) {
+        common(false, requestParameters)
         return null
     }
 
     @Override
-    DeleteOperationResponse deleteById(String index, String type, String id) {
-        return deleteById(index, type, Arrays.asList(id))
+    DeleteOperationResponse deleteById(String index, String type, String id, Map<String, String> requestParameters) {
+        return deleteById(index, type, Arrays.asList(id), requestParameters)
     }
 
     @Override
-    DeleteOperationResponse deleteById(String index, String type, List<String> ids) {
-        if (throwErrorInDelete) {
-            throw new IOException("Simulated IOException")
-        }
+    DeleteOperationResponse deleteById(String index, String type, List<String> ids, Map<String, String> requestParameters) {
+        common(throwErrorInDelete, requestParameters)
         return new DeleteOperationResponse(100L)
     }
 
     @Override
-    DeleteOperationResponse deleteByQuery(String query, String index, String type) {
-        return deleteById(index, type, Arrays.asList("1"))
+    DeleteOperationResponse deleteByQuery(String query, String index, String type, Map<String, String> requestParameters) {
+        return deleteById(index, type, Arrays.asList("1"), requestParameters)
     }
 
     @Override
-    Map<String, Object> get(String index, String type, String id) {
+    UpdateOperationResponse updateByQuery(String query, String index, String type, Map<String, String> requestParameters) {
+        common(throwErrorInUpdate, requestParameters)
+        return new UpdateOperationResponse(100L)
+    }
+
+    @Override
+    Map<String, Object> get(String index, String type, String id, Map<String, String> requestParameters) {
+        common(false, requestParameters)
         return [ "msg": "one" ]
     }
 
     @Override
-    SearchResponse search(String query, String index, String type) {
-        if (throwErrorInSearch) {
-            throw new IOException("Simulated IOException")
-        }
+    SearchResponse search(String query, String index, String type, Map<String, String> requestParameters) {
+        common(throwErrorInSearch, requestParameters)
 
         def mapper = new JsonSlurper()
-        def hits = mapper.parseText(HITS_RESULT)
-        def aggs = returnAggs ?  mapper.parseText(AGGS_RESULT) :  null
-        SearchResponse response = new SearchResponse(hits, aggs, 15, 5, false)
-        return response
+        List<Map<String, Object>> hits = (mapper.parseText(HITS_RESULT) as List<Map<String, Object>>)
+        Map<String, Object> aggs = (returnAggs ?  mapper.parseText(AGGS_RESULT) : null) as Map<String, Object>
+        return new SearchResponse(hits, aggs, 15, 5, false)
     }
 
     @Override
@@ -244,5 +258,13 @@ class TestElasticsearchClientService extends AbstractControllerService implement
 
     void setThrowErrorInDelete(boolean throwErrorInDelete) {
         this.throwErrorInDelete = throwErrorInDelete
+    }
+
+    void setThrowErrorInUpdate(boolean throwErrorInUpdate) {
+        this.throwErrorInUpdate = throwErrorInUpdate
+    }
+
+    Map<String, String> getRequestParameters() {
+        return this.requestParameters
     }
 }

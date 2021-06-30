@@ -86,7 +86,11 @@ class PutElasticsearchRecordTest {
     }
 
     void basicTest(int failure, int retry, int success) {
-        runner.enqueue(flowFileContents, [ "schema.name": "simple" ])
+        basicTest(failure, retry, success, [ "schema.name": "simple" ])
+    }
+
+    void basicTest(int failure, int retry, int success, Map<String, String> attr) {
+        runner.enqueue(flowFileContents, attr)
         runner.run()
 
         runner.assertTransferCount(PutElasticsearchRecord.REL_FAILURE, failure)
@@ -96,7 +100,47 @@ class PutElasticsearchRecordTest {
 
     @Test
     void simpleTest() {
+        def evalParametersClosure = { Map<String, String> params ->
+            Assert.assertTrue(params.isEmpty())
+        }
+        clientService.evalParametersClosure = evalParametersClosure
+
         basicTest(0, 0, 1)
+    }
+
+    @Test
+    void simpleTestWithRequestParameters() {
+        runner.setProperty("refresh", "true")
+        runner.setProperty("slices", '${slices}')
+        runner.setVariable("slices", "auto")
+        runner.assertValid()
+
+        def evalParametersClosure = { Map<String, String> params ->
+            Assert.assertEquals(2, params.size())
+            Assert.assertEquals("true", params.get("refresh"))
+            Assert.assertEquals("auto", params.get("slices"))
+        }
+
+        clientService.evalParametersClosure = evalParametersClosure
+
+        basicTest(0, 0, 1)
+    }
+
+    @Test
+    void simpleTestWithRequestParametersFlowFileEL() {
+        runner.setProperty("refresh", "true")
+        runner.setProperty("slices", '${slices}')
+        runner.assertValid()
+
+        def evalParametersClosure = { Map<String, String> params ->
+            Assert.assertEquals(2, params.size())
+            Assert.assertEquals("true", params.get("refresh"))
+            Assert.assertEquals("auto", params.get("slices"))
+        }
+
+        clientService.evalParametersClosure = evalParametersClosure
+
+        basicTest(0, 0, 1, ["schema.name": "simple", slices: "auto"])
     }
 
     @Test

@@ -51,7 +51,6 @@ class ElasticSearchLookupService_IT {
         runner.setProperty(service, ElasticSearchClientService.HTTP_HOSTS, "http://localhost:9400")
         runner.setProperty(service, ElasticSearchClientService.CONNECT_TIMEOUT, "10000")
         runner.setProperty(service, ElasticSearchClientService.SOCKET_TIMEOUT, "60000")
-        runner.setProperty(service, ElasticSearchClientService.RETRY_TIMEOUT, "60000")
         runner.setProperty(TestControllerServiceProcessor.CLIENT_SERVICE, "Client Service")
         runner.setProperty(TestControllerServiceProcessor.LOOKUP_SERVICE, "Lookup Service")
         runner.setProperty(lookupService, ElasticSearchLookupService.CLIENT_SERVICE, "Client Service")
@@ -107,7 +106,7 @@ class ElasticSearchLookupService_IT {
         ]
 
         coordinates.each { coordinate ->
-            def exception
+            def exception = null
 
             try {
                 lookupService.lookup(coordinate)
@@ -186,7 +185,7 @@ class ElasticSearchLookupService_IT {
         Assert.assertEquals("2018-04-10T12:18:05Z", subRec.getValue("dateField"))
     }
 
-    Record getSubRecord(Record rec, String fieldName) {
+    static Record getSubRecord(Record rec, String fieldName) {
         RecordSchema schema = rec.schema
         RecordSchema subSchema = ((RecordDataType)schema.getField(fieldName).get().dataType).childSchema
         rec.getAsRecord(fieldName, subSchema)

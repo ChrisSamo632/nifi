@@ -17,8 +17,11 @@
 package org.apache.nifi.processors.elasticsearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.nifi.annotation.behavior.DynamicProperty;
 import org.apache.nifi.annotation.behavior.EventDriven;
 import org.apache.nifi.annotation.behavior.InputRequirement;
+import org.apache.nifi.annotation.behavior.SystemResource;
+import org.apache.nifi.annotation.behavior.SystemResourceConsideration;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
 import org.apache.nifi.annotation.behavior.WritesAttributes;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
@@ -36,7 +39,7 @@ import org.apache.nifi.processor.AbstractProcessor;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.ProcessSession;
 import org.apache.nifi.processor.Relationship;
-import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.util.StringUtils;
 
 import java.io.IOException;
@@ -59,6 +62,13 @@ import java.util.Set;
         "Elasticsearch JSON DSL. It does not automatically paginate queries for the user. If an incoming relationship is added to this " +
         "processor, it will use the flowfile's content for the query. Care should be taken on the size of the query because the entire response " +
         "from Elasticsearch will be loaded into memory all at once and converted into the resulting flowfiles.")
+@DynamicProperty(
+        name = "A URL query parameter",
+        value = "The value to set it to",
+        expressionLanguageScope = ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
+        description = "Adds the specified property name/value as a query parameter in the Elasticsearch URL used for processing")
+@SystemResourceConsideration(resource = SystemResource.MEMORY,
+        description = "The full set of query results will be loaded into memory before being output as the flowfile")
 public class JsonQueryElasticsearch extends AbstractProcessor implements ElasticsearchRestProcessor {
     public static final Relationship REL_ORIGINAL = new Relationship.Builder().name("original")
             .description("All original flowfiles that don't cause an error to occur go to this relationship. " +
@@ -72,11 +82,13 @@ public class JsonQueryElasticsearch extends AbstractProcessor implements Elastic
     public static final Relationship REL_AGGREGATIONS = new Relationship.Builder().name("aggregations")
             .description("Aggregations are routed to this relationship.")
             .build();
+
     public static final AllowableValue SPLIT_UP_YES = new AllowableValue(
         "splitUp-yes",
         "Yes",
         "Split up results."
     );
+
     public static final AllowableValue SPLIT_UP_HITS_NO = new AllowableValue(
         "splitUp-no",
         "No",
@@ -92,6 +104,7 @@ public class JsonQueryElasticsearch extends AbstractProcessor implements Elastic
             .required(true)
             .expressionLanguageSupported(ExpressionLanguageScope.NONE)
             .build();
+
     public static final PropertyDescriptor SPLIT_UP_AGGREGATIONS = new PropertyDescriptor.Builder()
             .name("el-rest-split-up-aggregations")
             .displayName("Split up aggregation results")
@@ -108,12 +121,12 @@ public class JsonQueryElasticsearch extends AbstractProcessor implements Elastic
     private volatile ElasticSearchClientService clientService;
 
     static {
-        final Set<Relationship> _rels = new HashSet<>();
-        _rels.add(REL_ORIGINAL);
-        _rels.add(REL_FAILURE);
-        _rels.add(REL_HITS);
-        _rels.add(REL_AGGREGATIONS);
-        relationships = Collections.unmodifiableSet(_rels);
+        final Set<Relationship> rels = new HashSet<>();
+        rels.add(REL_ORIGINAL);
+        rels.add(REL_FAILURE);
+        rels.add(REL_HITS);
+        rels.add(REL_AGGREGATIONS);
+        relationships = Collections.unmodifiableSet(rels);
 
         final List<PropertyDescriptor> descriptors = new ArrayList<>();
         descriptors.add(QUERY);
@@ -137,6 +150,17 @@ public class JsonQueryElasticsearch extends AbstractProcessor implements Elastic
         return propertyDescriptors;
     }
 
+    @Override
+    protected PropertyDescriptor getSupportedDynamicPropertyDescriptor(String propertyDescriptorName) {
+        return new PropertyDescriptor.Builder()
+                .name(propertyDescriptorName)
+                .required(false)
+                .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+                .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
+                .dynamic(true)
+                .build();
+    }
+
     @OnScheduled
     public void onScheduled(final ProcessContext context) {
         clientService = context.getProperty(CLIENT_SERVICE).asControllerService(ElasticSearchClientService.class);
@@ -147,11 +171,10 @@ public class JsonQueryElasticsearch extends AbstractProcessor implements Elastic
         this.clientService = null;
     }
 
-
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Override
-    public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
+    public void onTrigger(final ProcessContext context, final ProcessSession session) {
         FlowFile input = null;
         if (context.hasIncomingConnection()) {
             input = session.get();
@@ -162,7 +185,6 @@ public class JsonQueryElasticsearch extends AbstractProcessor implements Elastic
         }
 
         try {
-
             final String query = getQuery(input, context, session);
             final String index = context.getProperty(INDEX).evaluateAttributeExpressions(input).getValue();
             final String type = context.getProperty(TYPE).evaluateAttributeExpressions(input).getValue();
@@ -170,27 +192,27 @@ public class JsonQueryElasticsearch extends AbstractProcessor implements Elastic
                 ? context.getProperty(QUERY_ATTRIBUTE).evaluateAttributeExpressions(input).getValue()
                 : null;
 
-            SearchResponse response = clientService.search(query, index, type);
+            final SearchResponse response = clientService.search(query, index, type, getUrlQueryParameters(context, input));
 
-            Map<String, String> attributes = new HashMap<>();
+            final Map<String, String> attributes = new HashMap<>();
             attributes.put(CoreAttributes.MIME_TYPE.key(), "application/json");
             if (!StringUtils.isBlank(queryAttr)) {
                 attributes.put(queryAttr, query);
             }
 
-            List<FlowFile> hitsFlowFiles = handleHits(response.getHits(), context, session, input, attributes);
-            List<FlowFile> aggsFlowFiles = handleAggregations(response.getAggregations(), context, session, input, attributes);
+            final List<FlowFile> hitsFlowFiles = handleHits(response.getHits(), context, session, input, attributes);
+            final List<FlowFile> aggsFlowFiles = handleAggregations(response.getAggregations(), context, session, input, attributes);
 
             final String transitUri = clientService.getTransitUrl(index, type);
 
-            if (hitsFlowFiles.size() > 0) {
+            if (!hitsFlowFiles.isEmpty()) {
                 session.transfer(hitsFlowFiles, REL_HITS);
                 for (FlowFile ff : hitsFlowFiles) {
                     session.getProvenanceReporter().send(ff, transitUri);
                 }
             }
 
-            if (aggsFlowFiles.size() > 0) {
+            if (!aggsFlowFiles.isEmpty()) {
                 session.transfer(aggsFlowFiles, REL_AGGREGATIONS);
                 for (FlowFile ff : aggsFlowFiles) {
                     session.getProvenanceReporter().send(ff, transitUri);

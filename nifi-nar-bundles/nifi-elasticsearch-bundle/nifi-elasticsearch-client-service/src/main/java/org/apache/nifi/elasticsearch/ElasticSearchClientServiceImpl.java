@@ -42,7 +42,6 @@ import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.entity.ContentType;
 import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.http.message.BasicHeader;
 import org.apache.http.nio.entity.NStringEntity;
 import org.apache.nifi.annotation.lifecycle.OnDisabled;
 import org.apache.nifi.annotation.lifecycle.OnEnabled;
@@ -54,6 +53,7 @@ import org.apache.nifi.reporting.InitializationException;
 import org.apache.nifi.ssl.SSLContextService;
 import org.apache.nifi.util.StopWatch;
 import org.apache.nifi.util.StringUtils;
+import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
@@ -123,7 +123,6 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
 
         final Integer connectTimeout = context.getProperty(CONNECT_TIMEOUT).asInteger();
         final Integer readTimeout    = context.getProperty(SOCKET_TIMEOUT).asInteger();
-        final Integer retryTimeout   = context.getProperty(RETRY_TIMEOUT).asInteger();
 
         HttpHost[] hh = new HttpHost[hostsSplit.length];
         for (int x = 0; x < hh.length; x++) {
@@ -159,13 +158,12 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
                     requestConfigBuilder.setConnectTimeout(connectTimeout);
                     requestConfigBuilder.setSocketTimeout(readTimeout);
                     return requestConfigBuilder;
-                })
-                .setMaxRetryTimeoutMillis(retryTimeout);
+                });
 
         this.client = builder.build();
     }
 
-    private Response runQuery(String endpoint, String query, String index, String type) {
+    private Response runQuery(String endpoint, String query, String index, String type, Map<String, String> requestParameters) {
         StringBuilder sb = new StringBuilder()
             .append("/").append(index);
         if (type != null && !type.equals("")) {
@@ -177,12 +175,13 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
         HttpEntity queryEntity = new NStringEntity(query, ContentType.APPLICATION_JSON);
 
         try {
-            return client.performRequest("POST", sb.toString(), Collections.emptyMap(), queryEntity);
+            return performRequest("POST", sb.toString(), queryEntity, requestParameters);
         } catch (Exception e) {
             throw new ElasticsearchError(e);
         }
     }
 
+    @SuppressWarnings("unchecked")
     private Map<String, Object> parseResponse(Response response) {
         final int code = response.getStatusLine().getStatusCode();
 
@@ -191,7 +190,7 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
                 InputStream inputStream = response.getEntity().getContent();
                 byte[] result = IOUtils.toByteArray(inputStream);
                 inputStream.close();
-                return (Map<String, Object>) mapper.readValue(new String(result, responseCharset), Map.class);
+                return mapper.readValue(new String(result, responseCharset), Map.class);
             } else {
                 String errorMessage = String.format("ElasticSearch reported an error while trying to run the query: %s",
                         response.getStatusLine().getReasonPhrase());
@@ -203,8 +202,8 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
     }
 
     @Override
-    public IndexOperationResponse add(IndexOperationRequest operation) {
-        return bulk(Collections.singletonList(operation));
+    public IndexOperationResponse add(IndexOperationRequest operation, Map<String, String> requestParameters) {
+        return bulk(Collections.singletonList(operation), requestParameters);
     }
 
     private String flatten(String str) {
@@ -263,7 +262,7 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
     }
 
     @Override
-    public IndexOperationResponse bulk(List<IndexOperationRequest> operations) {
+    public IndexOperationResponse bulk(List<IndexOperationRequest> operations, Map<String, String> requestParameters) {
         try {
             StringBuilder payload = new StringBuilder();
             for (final IndexOperationRequest or : operations) {
@@ -276,7 +275,7 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
             HttpEntity entity = new NStringEntity(payload.toString(), ContentType.APPLICATION_JSON);
             StopWatch watch = new StopWatch();
             watch.start();
-            Response response = client.performRequest("POST", "/_bulk", Collections.emptyMap(), entity);
+            final Response response = performRequest("POST", "_bulk", entity, requestParameters);
             watch.stop();
 
             String rawResponse = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
@@ -292,20 +291,20 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
     }
 
     @Override
-    public Long count(String query, String index, String type) {
-        Response response = runQuery("_count", query, index, type);
+    public Long count(String query, String index, String type, Map<String, String> requestParameters) {
+        Response response = runQuery("_count", query, index, type, requestParameters);
         Map<String, Object> parsed = parseResponse(response);
 
         return ((Integer)parsed.get("count")).longValue();
     }
 
     @Override
-    public DeleteOperationResponse deleteById(String index, String type, String id) {
-        return deleteById(index, type, Collections.singletonList(id));
+    public DeleteOperationResponse deleteById(String index, String type, String id, Map<String, String> requestParameters) {
+        return deleteById(index, type, Collections.singletonList(id), requestParameters);
     }
 
     @Override
-    public DeleteOperationResponse deleteById(String index, String type, List<String> ids) {
+    public DeleteOperationResponse deleteById(String index, String type, List<String> ids, Map<String, String> requestParameters) {
         try {
             StringBuilder sb = new StringBuilder();
             for (final String id : ids) {
@@ -315,7 +314,7 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
             HttpEntity entity = new NStringEntity(sb.toString(), ContentType.APPLICATION_JSON);
             StopWatch watch = new StopWatch();
             watch.start();
-            Response response = client.performRequest("POST", "/_bulk", Collections.emptyMap(), entity);
+            final Response response = performRequest("POST", "_bulk", entity, requestParameters);
             watch.stop();
 
             if (getLogger().isDebugEnabled()) {
@@ -330,9 +329,9 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
     }
 
     @Override
-    public DeleteOperationResponse deleteByQuery(String query, String index, String type) {
+    public DeleteOperationResponse deleteByQuery(String query, String index, String type, Map<String, String> requestParameters) {
         long start = System.currentTimeMillis();
-        Response response = runQuery("_delete_by_query", query, index, type);
+        Response response = runQuery("_delete_by_query", query, index, type, requestParameters);
         long end   = System.currentTimeMillis();
 
         // check for errors in response
@@ -342,7 +341,20 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
     }
 
     @Override
-    public Map<String, Object> get(String index, String type, String id) {
+    public UpdateOperationResponse updateByQuery(String query, String index, String type, Map<String, String> requestParameters) {
+        long start = System.currentTimeMillis();
+        Response response = runQuery("_update_by_query", query, index, type, requestParameters);
+        long end   = System.currentTimeMillis();
+
+        // check for errors in response
+        parseResponse(response);
+
+        return new UpdateOperationResponse(end - start);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public Map<String, Object> get(String index, String type, String id, Map<String, String> requestParameters) {
         try {
             StringBuilder endpoint = new StringBuilder();
             endpoint.append(index);
@@ -350,9 +362,9 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
                 endpoint.append("/").append(type);
             }
             endpoint.append("/").append(id);
-            Response response = client.performRequest("GET", endpoint.toString(), new BasicHeader("Content-Type", "application/json"));
+            final Response response = performRequest("GET", endpoint.toString(), null, requestParameters);
 
-            String body = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
+            final String body = IOUtils.toString(response.getEntity().getContent(), StandardCharsets.UTF_8);
 
             return (Map<String, Object>) mapper.readValue(body, Map.class).get("_source");
         } catch (Exception ex) {
@@ -364,6 +376,7 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
     /*
      * In pre-7.X ElasticSearch, it should return just a number. 7.X and after they are returning a map.
      */
+    @SuppressWarnings("unchecked")
     private int handleSearchCount(Object raw) {
         if (raw instanceof Number) {
             return Integer.parseInt(raw.toString());
@@ -374,9 +387,10 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
         }
     }
 
+    @SuppressWarnings("unchecked")
     @Override
-    public SearchResponse search(String query, String index, String type) {
-        Response response = runQuery("_search", query, index, type);
+    public SearchResponse search(String query, String index, String type, Map<String, String> requestParameters) {
+        Response response = runQuery("_search", query, index, type, requestParameters);
         Map<String, Object> parsed = parseResponse(response);
 
         int took = (Integer)parsed.get("took");
@@ -390,16 +404,14 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
         SearchResponse esr = new SearchResponse(hits, aggregations, count, took, timedOut);
 
         if (getLogger().isDebugEnabled()) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("******************");
-            sb.append(String.format("Took: %d", took));
-            sb.append(String.format("Timed out: %s", timedOut));
-            sb.append(String.format("Aggregation count: %d", aggregations.size()));
-            sb.append(String.format("Hit count: %d", hits.size()));
-            sb.append(String.format("Total found: %d", count));
-            sb.append("******************");
-
-            getLogger().debug(sb.toString());
+            String searchSummary = "******************" +
+                    String.format("Took: %d", took) +
+                    String.format("Timed out: %s", timedOut) +
+                    String.format("Aggregation count: %d", aggregations.size()) +
+                    String.format("Hit count: %d", hits.size()) +
+                    String.format("Total found: %d", count) +
+                    "******************";
+            getLogger().debug(searchSummary);
         }
 
         return esr;
@@ -407,12 +419,21 @@ public class ElasticSearchClientServiceImpl extends AbstractControllerService im
 
     @Override
     public String getTransitUrl(String index, String type) {
-        return new StringBuilder()
-                .append(this.url)
-                .append(StringUtils.isNotBlank(index) ? "/" : "")
-                .append(StringUtils.isNotBlank(index) ? index : "")
-                .append(StringUtils.isNotBlank(type) ? "/" : "")
-                .append(StringUtils.isNotBlank(type) ? type : "")
-                .toString();
+        return this.url +
+                (StringUtils.isNotBlank(index) ? "/" : "") +
+                (StringUtils.isNotBlank(index) ? index : "") +
+                (StringUtils.isNotBlank(type) ? "/" : "") +
+                (StringUtils.isNotBlank(type) ? type : "");
+    }
+
+    private Response performRequest(final String method, final String endpoint, final HttpEntity entity, final Map<String, String> requestParameters) throws IOException {
+        final Request request = new Request(method, endpoint);
+        if (entity != null) {
+            request.setEntity(entity);
+        }
+        if (requestParameters != null && !requestParameters.isEmpty()) {
+            request.addParameters(requestParameters);
+        }
+        return client.performRequest(request);
     }
 }

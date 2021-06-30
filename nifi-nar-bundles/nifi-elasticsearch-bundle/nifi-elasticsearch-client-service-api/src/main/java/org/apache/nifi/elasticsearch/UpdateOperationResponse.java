@@ -17,10 +17,10 @@
 
 package org.apache.nifi.elasticsearch;
 
-public class DeleteOperationResponse implements OperationResponse {
+public class UpdateOperationResponse implements OperationResponse {
     private final long took;
 
-    public DeleteOperationResponse(long took) {
+    public UpdateOperationResponse(long took) {
         this.took = took;
     }
 

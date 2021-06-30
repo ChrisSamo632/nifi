@@ -20,29 +20,29 @@ package org.apache.nifi.processors.elasticsearch
 import org.apache.nifi.util.TestRunner
 import org.apache.nifi.util.TestRunners
 
-class DeleteByQueryElasticsearchTest extends AbstractByQueryElasticsearchTest {
+class UpdateByQueryElasticsearchTest extends AbstractByQueryElasticsearchTest {
     @Override
     String queryAttr() {
-        return "es.delete.query"
+        return "es.update.query"
     }
 
     @Override
     String tookAttr() {
-        return DeleteByQueryElasticsearch.TOOK_ATTRIBUTE
+        return UpdateByQueryElasticsearch.TOOK_ATTRIBUTE
     }
 
     @Override
     String errorAttr() {
-        return DeleteByQueryElasticsearch.ERROR_ATTRIBUTE
+        return UpdateByQueryElasticsearch.ERROR_ATTRIBUTE
     }
 
     @Override
     TestRunner setupRunner() {
-        return TestRunners.newTestRunner(DeleteByQueryElasticsearch.class)
+        return TestRunners.newTestRunner(UpdateByQueryElasticsearch.class)
     }
 
     @Override
     void expectError(final TestElasticsearchClientService client) {
-        client.setThrowErrorInDelete(true);
+        client.setThrowErrorInUpdate(true);
     }
 }

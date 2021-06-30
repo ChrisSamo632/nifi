@@ -16,3 +16,4 @@
 org.apache.nifi.processors.elasticsearch.DeleteByQueryElasticsearch
 org.apache.nifi.processors.elasticsearch.JsonQueryElasticsearch
 org.apache.nifi.processors.elasticsearch.PutElasticsearchRecord
+org.apache.nifi.processors.elasticsearch.UpdateByQueryElasticsearch

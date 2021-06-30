@@ -23,12 +23,12 @@ import org.junit.Test
 class SearchResponseTest {
     @Test
     void test() {
-        def results = []
-        def aggs    = [:]
-        def num     = 10
-        def took    = 100
-        def timeout = false
-        def response = new SearchResponse(results, aggs, num, took, timeout)
+        List<Map<String, Object>> results = []
+        Map<String, Object> aggs          = [:]
+        def num                           = 10
+        def took                          = 100
+        def timeout                       = false
+        def response                      = new SearchResponse(results, aggs, num, took, timeout)
         def str = response.toString()
         Assert.assertEquals(results, response.hits)
         Assert.assertEquals(aggs, response.aggregations)

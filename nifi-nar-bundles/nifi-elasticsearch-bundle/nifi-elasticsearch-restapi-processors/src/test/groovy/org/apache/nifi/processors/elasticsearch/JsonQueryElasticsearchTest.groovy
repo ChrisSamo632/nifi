@@ -23,12 +23,10 @@ import org.apache.nifi.util.TestRunners
 import org.junit.Assert
 import org.junit.Test
 
-import java.util.List
-
 class JsonQueryElasticsearchTest {
     private static final String INDEX_NAME = "messages"
 
-    void testCounts(TestRunner runner, int success, int hits, int failure, int aggregations) {
+    static void testCounts(TestRunner runner, int success, int hits, int failure, int aggregations) {
         runner.assertTransferCount(JsonQueryElasticsearch.REL_ORIGINAL, success)
         runner.assertTransferCount(JsonQueryElasticsearch.REL_HITS, hits)
         runner.assertTransferCount(JsonQueryElasticsearch.REL_FAILURE, failure)
@@ -37,7 +35,6 @@ class JsonQueryElasticsearchTest {
 
     @Test
     void testBasicQuery() throws Exception {
-
         JsonQueryElasticsearch processor = new JsonQueryElasticsearch()
         TestRunner runner = TestRunners.newTestRunner(processor)
         TestElasticsearchClientService service = new TestElasticsearchClientService(false)
@@ -59,6 +56,43 @@ class JsonQueryElasticsearchTest {
         runner.enqueue("test")
         runner.run(1, true, true)
         testCounts(runner, 1, 10, 0, 0)
+
+        Assert.assertTrue(service.getRequestParameters().isEmpty())
+    }
+
+    @Test
+    void testBasicQueryWithRequestParameters() throws Exception {
+        JsonQueryElasticsearch processor = new JsonQueryElasticsearch()
+        TestRunner runner = TestRunners.newTestRunner(processor)
+        TestElasticsearchClientService service = new TestElasticsearchClientService(false)
+        runner.addControllerService("esService", service)
+        runner.enableControllerService(service)
+        runner.setProperty(JsonQueryElasticsearch.CLIENT_SERVICE, "esService")
+        runner.setProperty(JsonQueryElasticsearch.INDEX, INDEX_NAME)
+        runner.setProperty(JsonQueryElasticsearch.TYPE, "message")
+        runner.setValidateExpressionUsage(true)
+        runner.setProperty(JsonQueryElasticsearch.QUERY, "{ \"query\": { \"match_all\": {} }}")
+        runner.setProperty("refresh", "true")
+        runner.setProperty("slices", '${slices}')
+
+        runner.enqueue("test", [slices: "auto"])
+        runner.run(1, true, true)
+        testCounts(runner, 1, 1, 0, 0)
+
+        Assert.assertEquals(2, service.getRequestParameters().size())
+        Assert.assertEquals("true", service.getRequestParameters().get("refresh"))
+        Assert.assertEquals("auto", service.getRequestParameters().get("slices"))
+
+        runner.setProperty(JsonQueryElasticsearch.SPLIT_UP_HITS, JsonQueryElasticsearch.SPLIT_UP_YES)
+        runner.clearProvenanceEvents()
+        runner.clearTransferState()
+        runner.enqueue("test", [slices: "auto"])
+        runner.run(1, true, true)
+        testCounts(runner, 1, 10, 0, 0)
+
+        Assert.assertEquals(2, service.getRequestParameters().size())
+        Assert.assertEquals("true", service.getRequestParameters().get("refresh"))
+        Assert.assertEquals("auto", service.getRequestParameters().get("slices"))
     }
 
     @Test
@@ -248,5 +282,56 @@ class JsonQueryElasticsearchTest {
         runner.assertTransferCount(JsonQueryElasticsearch.REL_SUCCESS, 0)
         runner.assertTransferCount(JsonQueryElasticsearch.REL_FAILURE, 0)
         runner.assertTransferCount(JsonQueryElasticsearch.REL_RETRY, 0)
+    }
+
+    @Test
+    void testNoInputHandling() {
+        JsonQueryElasticsearch processor = new JsonQueryElasticsearch()
+        TestRunner runner = TestRunners.newTestRunner(processor)
+        TestElasticsearchClientService service = new TestElasticsearchClientService(false)
+        runner.addControllerService("esService", service)
+        runner.enableControllerService(service)
+        runner.setProperty(JsonQueryElasticsearch.CLIENT_SERVICE, "esService")
+        runner.setProperty(JsonQueryElasticsearch.INDEX, INDEX_NAME)
+        runner.setProperty(JsonQueryElasticsearch.TYPE, "message")
+        runner.setValidateExpressionUsage(true)
+        runner.setProperty(JsonQueryElasticsearch.QUERY, "{ \"query\": { \"match_all\": {} }}")
+        runner.setIncomingConnection(false)
+
+        runner.run()
+
+        runner.assertTransferCount(JsonQueryElasticsearch.REL_SUCCESS, 0)
+        runner.assertTransferCount(JsonQueryElasticsearch.REL_FAILURE, 0)
+        runner.assertTransferCount(JsonQueryElasticsearch.REL_RETRY, 0)
+
+        Assert.assertTrue(service.getRequestParameters().isEmpty())
+    }
+
+    @Test
+    void testNoInputHandlingWithRequestParameters() {
+        JsonQueryElasticsearch processor = new JsonQueryElasticsearch()
+        TestRunner runner = TestRunners.newTestRunner(processor)
+        TestElasticsearchClientService service = new TestElasticsearchClientService(false)
+        runner.addControllerService("esService", service)
+        runner.enableControllerService(service)
+        runner.setProperty(JsonQueryElasticsearch.CLIENT_SERVICE, "esService")
+        runner.setProperty(JsonQueryElasticsearch.INDEX, INDEX_NAME)
+        runner.setProperty(JsonQueryElasticsearch.TYPE, "message")
+        runner.setProperty("refresh", "true")
+        runner.setProperty("slices", '${slices}')
+        runner.setVariable("slices", "auto")
+        runner.setValidateExpressionUsage(true)
+        runner.setProperty(JsonQueryElasticsearch.QUERY, "{ \"query\": { \"match_all\": {} }}")
+        runner.setIncomingConnection(false)
+
+        runner.run()
+
+        runner.assertTransferCount(JsonQueryElasticsearch.REL_SUCCESS, 0)
+        runner.assertTransferCount(JsonQueryElasticsearch.REL_FAILURE, 0)
+        runner.assertTransferCount(JsonQueryElasticsearch.REL_RETRY, 0)
+
+        Assert.assertEquals(2, service.getRequestParameters().size())
+        Assert.assertEquals("true", service.getRequestParameters().get("refresh"))
+        Assert.assertEquals("auto", service.getRequestParameters().get("slices"))
     }
 }

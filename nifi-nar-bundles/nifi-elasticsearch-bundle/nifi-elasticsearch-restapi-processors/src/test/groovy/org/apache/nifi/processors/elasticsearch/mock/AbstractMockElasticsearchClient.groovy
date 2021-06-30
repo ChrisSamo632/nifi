@@ -25,42 +25,47 @@ class AbstractMockElasticsearchClient extends AbstractControllerService implemen
     boolean throwFatalError
 
     @Override
-    IndexOperationResponse add(IndexOperationRequest operation) {
+    IndexOperationResponse add(IndexOperationRequest operation, Map<String, String> requestParameters) {
         return null
     }
 
     @Override
-    IndexOperationResponse bulk(List<IndexOperationRequest> operations) {
+    IndexOperationResponse bulk(List<IndexOperationRequest> operations, Map<String, String> requestParameters) {
         return null
     }
 
     @Override
-    Long count(String query, String index, String type) {
+    Long count(String query, String index, String type, Map<String, String> requestParameters) {
         return null
     }
 
     @Override
-    DeleteOperationResponse deleteById(String index, String type, String id) {
+    DeleteOperationResponse deleteById(String index, String type, String id, Map<String, String> requestParameters) {
         return null
     }
 
     @Override
-    DeleteOperationResponse deleteById(String index, String type, List<String> ids) {
+    DeleteOperationResponse deleteById(String index, String type, List<String> ids, Map<String, String> requestParameters) {
         return null
     }
 
     @Override
-    DeleteOperationResponse deleteByQuery(String query, String index, String type) {
+    DeleteOperationResponse deleteByQuery(String query, String index, String type, Map<String, String> requestParameters) {
         return null
     }
 
     @Override
-    Map<String, Object> get(String index, String type, String id) {
+    UpdateOperationResponse updateByQuery(String query, String index, String type, Map<String, String> requestParameters) {
         return null
     }
 
     @Override
-    SearchResponse search(String query, String index, String type) {
+    Map<String, Object> get(String index, String type, String id, Map<String, String> requestParameters) {
+        return null
+    }
+
+    @Override
+    SearchResponse search(String query, String index, String type, Map<String, String> requestParameters) {
         return null
     }
 

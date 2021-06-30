@@ -30,6 +30,8 @@ import org.apache.nifi.processor.util.StandardValidators;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public interface ElasticsearchRestProcessor {
     String ATTR_RECORD_COUNT = "record.count";
@@ -61,6 +63,7 @@ public interface ElasticsearchRestProcessor {
             .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
             .addValidator(JsonValidator.INSTANCE)
             .build();
+
     PropertyDescriptor QUERY_ATTRIBUTE = new PropertyDescriptor.Builder()
             .name("el-query-attribute")
             .displayName("Query Attribute")
@@ -106,7 +109,7 @@ public interface ElasticsearchRestProcessor {
                     "configured will be sent to this relationship as part of a failed record record set.")
             .autoTerminateDefault(true).build();
 
-    default String getQuery(FlowFile input, ProcessContext context, ProcessSession session) throws IOException {
+    default String getQuery(final FlowFile input, final ProcessContext context, final ProcessSession session) throws IOException {
         String retVal = null;
         if (context.getProperty(QUERY).isSet()) {
             retVal = context.getProperty(QUERY).evaluateAttributeExpressions(input).getValue();
@@ -119,5 +122,16 @@ public interface ElasticsearchRestProcessor {
         }
 
         return retVal;
+    }
+
+    default Map<String, String> getUrlQueryParameters(final ProcessContext context, final FlowFile flowFile) {
+        return context.getProperties().entrySet().stream()
+                // filter non-null dynamic properties
+                .filter(e -> e.getKey().isDynamic() && e.getValue() != null)
+                // convert to Map of URL parameter keys and values
+                .collect(Collectors.toMap(
+                    e -> e.getKey().getName(),
+                    e -> context.getProperty(e.getKey()).evaluateAttributeExpressions(flowFile).getValue()
+                ));
     }
 }

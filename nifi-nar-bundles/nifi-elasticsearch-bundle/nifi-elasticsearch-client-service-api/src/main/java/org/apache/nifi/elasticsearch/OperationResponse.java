@@ -17,15 +17,9 @@
 
 package org.apache.nifi.elasticsearch;
 
-public class DeleteOperationResponse implements OperationResponse {
-    private final long took;
-
-    public DeleteOperationResponse(long took) {
-        this.took = took;
-    }
-
-    @Override
-    public long getTook() {
-        return took;
-    }
+public interface OperationResponse {
+    /**
+     * @return the time in millisecond taken to complete the Elasticsearch operation
+     */
+    long getTook();
 }

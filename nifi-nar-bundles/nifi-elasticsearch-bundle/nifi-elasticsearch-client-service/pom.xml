@@ -25,12 +25,6 @@
     <artifactId>nifi-elasticsearch-client-service</artifactId>
     <packaging>jar</packaging>
 
-    <properties>
-        <es.int.version>5.6.16</es.int.version>
-        <script.name>setup-5.script</script.name>
-        <type.name>faketype</type.name>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>org.apache.nifi</groupId>
@@ -61,6 +55,35 @@
             <version>1.14.0-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-ssl-context-service-api</artifactId>
+            <version>1.14.0-SNAPSHOT</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-elasticsearch-client-service-api</artifactId>
+            <version>1.14.0-SNAPSHOT</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-avro-record-utils</artifactId>
+            <version>1.14.0-SNAPSHOT</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-schema-registry-service-api</artifactId>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.nifi</groupId>
+            <artifactId>nifi-record-path</artifactId>
+            <version>1.14.0-SNAPSHOT</version>
+            <scope>compile</scope>
+        </dependency>
 
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
@@ -89,6 +112,16 @@
             <artifactId>log4j-over-slf4j</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>com.jayway.jsonpath</groupId>
+            <artifactId>json-path</artifactId>
+            <version>2.4.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <version>4.5.13</version>
+        </dependency>
 
         <!-- test dependencies -->
         <dependency>
@@ -98,27 +131,11 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-ssl-context-service-api</artifactId>
-            <version>1.14.0-SNAPSHOT</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.nifi</groupId>
-            <artifactId>nifi-elasticsearch-client-service-api</artifactId>
-            <version>1.14.0-SNAPSHOT</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.elasticsearch</groupId>
-            <artifactId>elasticsearch</artifactId>
-            <version>5.6.16</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>elasticsearch-rest-high-level-client</artifactId>
-            <version>5.6.16</version>
+            <!-- stopped at 7.10.2 as it is the last Apache2 licensed version
+                Elasticsearch changed to SSPL 1.0/Elastic License v2 from version 7.11.0 -->
+            <version>7.10.2</version>
             <scope>compile</scope>
             <exclusions>
                 <exclusion>
@@ -164,19 +181,21 @@
             <artifactId>groovy-json</artifactId>
             <version>${nifi.groovy.version}</version>
             <scope>test</scope>
-	</dependency>
-	<dependency>
-            <groupId>org.elasticsearch.client</groupId>
-            <artifactId>elasticsearch-rest-client</artifactId>
-            <version>5.6.16</version>
         </dependency>
     </dependencies>
+
+    <!-- integration test properties -->
+    <properties>
+        <es.int.version>5.6.16</es.int.version>
+        <script.name>setup-5.script</script.name>
+        <type.name>faketype</type.name>
+    </properties>
 
     <profiles>
         <profile>
             <id>integration-6</id>
             <properties>
-                <es.int.version>6.8.13</es.int.version>
+                <es.int.version>6.8.14</es.int.version>
                 <type.name>_doc</type.name>
                 <script.name>setup-6.script</script.name>
             </properties>
@@ -184,7 +203,7 @@
         <profile>
             <id>integration-7</id>
             <properties>
-                <es.int.version>7.10.0</es.int.version>
+                <es.int.version>7.10.2</es.int.version>
                 <script.name>setup-7.script</script.name>
                 <type.name>_doc</type.name>
             </properties>

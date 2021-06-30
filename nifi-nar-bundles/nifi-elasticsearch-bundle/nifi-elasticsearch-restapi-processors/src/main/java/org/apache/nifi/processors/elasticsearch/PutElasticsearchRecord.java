@@ -19,6 +19,7 @@ package org.apache.nifi.processors.elasticsearch;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import org.apache.nifi.annotation.behavior.DynamicProperty;
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.documentation.CapabilityDescription;
 import org.apache.nifi.annotation.documentation.Tags;
@@ -47,6 +48,7 @@ import org.apache.nifi.serialization.RecordReader;
 import org.apache.nifi.serialization.RecordReaderFactory;
 import org.apache.nifi.serialization.RecordSetWriter;
 import org.apache.nifi.serialization.RecordSetWriterFactory;
+import org.apache.nifi.serialization.record.PushBackRecordSet;
 import org.apache.nifi.serialization.record.Record;
 import org.apache.nifi.serialization.record.RecordFieldType;
 import org.apache.nifi.serialization.record.util.DataTypeUtils;
@@ -65,6 +67,11 @@ import java.util.Set;
 @InputRequirement(InputRequirement.Requirement.INPUT_REQUIRED)
 @Tags({"json", "elasticsearch", "elasticsearch5", "elasticsearch6", "put", "index", "record"})
 @CapabilityDescription("A record-aware Elasticsearch put processor that uses the official Elastic REST client libraries.")
+@DynamicProperty(
+        name = "A URL query parameter",
+        value = "The value to set it to",
+        expressionLanguageScope = ExpressionLanguageScope.FLOWFILE_ATTRIBUTES,
+        description = "Adds the specified property name/value as a query parameter in the Elasticsearch URL used for processing")
 public class PutElasticsearchRecord extends AbstractProcessor implements ElasticsearchRestProcessor {
     static final PropertyDescriptor RECORD_READER = new PropertyDescriptor.Builder()
         .name("put-es-record-reader")
@@ -158,6 +165,12 @@ public class PutElasticsearchRecord extends AbstractProcessor implements Elastic
         REL_SUCCESS, REL_FAILURE, REL_RETRY, REL_FAILED_RECORDS
     )));
 
+    private RecordReaderFactory readerFactory;
+    private RecordPathCache recordPathCache;
+    private volatile ElasticSearchClientService clientService;
+    private RecordSetWriterFactory writerFactory;
+    private boolean logErrors;
+
     @Override
     public Set<Relationship> getRelationships() {
         return RELATIONSHIPS;
@@ -168,11 +181,16 @@ public class PutElasticsearchRecord extends AbstractProcessor implements Elastic
         return DESCRIPTORS;
     }
 
-    private RecordReaderFactory readerFactory;
-    private RecordPathCache recordPathCache;
-    private ElasticSearchClientService clientService;
-    private RecordSetWriterFactory writerFactory;
-    private boolean logErrors;
+    @Override
+    protected PropertyDescriptor getSupportedDynamicPropertyDescriptor(String propertyDescriptorName) {
+        return new PropertyDescriptor.Builder()
+                .name(propertyDescriptorName)
+                .required(false)
+                .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+                .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
+                .dynamic(true)
+                .build();
+    }
 
     @OnScheduled
     public void onScheduled(ProcessContext context) {
@@ -183,9 +201,9 @@ public class PutElasticsearchRecord extends AbstractProcessor implements Elastic
         this.logErrors = context.getProperty(LOG_ERROR_RESPONSES).asBoolean();
     }
 
-
+    @SuppressWarnings("unchecked")
     @Override
-    public void onTrigger(ProcessContext context, ProcessSession session) throws ProcessException {
+    public void onTrigger(ProcessContext context, ProcessSession session) {
         FlowFile input = session.get();
         if (input == null) {
             return;
@@ -218,11 +236,12 @@ public class PutElasticsearchRecord extends AbstractProcessor implements Elastic
 
         try (final InputStream inStream = session.read(input);
              final RecordReader reader = readerFactory.createRecordReader(input, inStream, getLogger())) {
+            final PushBackRecordSet recordSet = new PushBackRecordSet(reader.createRecordSet());
             Record record;
             List<IndexOperationRequest> operationList = new ArrayList<>();
             List<Record> originals = new ArrayList<>();
 
-            while ((record = reader.nextRecord()) != null) {
+            while ((record = recordSet.next()) != null) {
                 final String idx = getFromRecordPath(record, iPath, index);
                 final String t   = getFromRecordPath(record, tPath, type);
                 final IndexOperationRequest.Operation o = IndexOperationRequest.Operation.forValue(getFromRecordPath(record, ioPath, indexOp));
@@ -233,23 +252,15 @@ public class PutElasticsearchRecord extends AbstractProcessor implements Elastic
                 operationList.add(new IndexOperationRequest(idx, t, id, contentMap, o));
                 originals.add(record);
 
-                if (operationList.size() == batchSize) {
+                if (operationList.size() == batchSize || !recordSet.isAnotherRecord()) {
                     BulkOperation bundle = new BulkOperation(operationList, originals, reader.getSchema());
-                    FlowFile bad = indexDocuments(bundle, session, input);
+                    FlowFile bad = indexDocuments(bundle, context, session, input);
                     if (bad != null) {
                         badRecords.add(bad);
                     }
 
                     operationList.clear();
                     originals.clear();
-                }
-            }
-
-            if (operationList.size() > 0) {
-                BulkOperation bundle = new BulkOperation(operationList, originals, reader.getSchema());
-                FlowFile bad = indexDocuments(bundle, session, input);
-                if (bad != null) {
-                    badRecords.add(bad);
                 }
             }
         } catch (ElasticsearchError ese) {
@@ -278,8 +289,8 @@ public class PutElasticsearchRecord extends AbstractProcessor implements Elastic
         bad.clear();
     }
 
-    private FlowFile indexDocuments(BulkOperation bundle, ProcessSession session, FlowFile input) throws Exception {
-        IndexOperationResponse response = clientService.bulk(bundle.getOperationList());
+    private FlowFile indexDocuments(BulkOperation bundle, ProcessContext context, ProcessSession session, FlowFile input) throws Exception {
+        IndexOperationResponse response = clientService.bulk(bundle.getOperationList(), getUrlQueryParameters(context, input));
         if (response.hasErrors()) {
             if(logErrors || getLogger().isDebugEnabled()) {
                 List<Map<String, Object>> errors = response.getItems();

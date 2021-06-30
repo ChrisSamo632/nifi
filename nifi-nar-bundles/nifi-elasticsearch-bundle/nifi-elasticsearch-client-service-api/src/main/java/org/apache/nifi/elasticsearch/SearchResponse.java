@@ -20,12 +20,12 @@ package org.apache.nifi.elasticsearch;
 import java.util.List;
 import java.util.Map;
 
-public class SearchResponse {
-    private List<Map<String, Object>> hits;
-    private Map<String, Object> aggregations;
-    private long numberOfHits;
-    private int took;
-    private boolean timedOut;
+public class SearchResponse implements OperationResponse {
+    private final List<Map<String, Object>> hits;
+    private final Map<String, Object> aggregations;
+    private final long numberOfHits;
+    private final int took;
+    private final boolean timedOut;
 
     public SearchResponse(List<Map<String, Object>> hits, Map<String, Object> aggregations,
                           int numberOfHits, int took, boolean timedOut) {
@@ -52,7 +52,8 @@ public class SearchResponse {
         return timedOut;
     }
 
-    public int getTook() {
+    @Override
+    public long getTook() {
         return took;
     }
 
