@@ -175,15 +175,15 @@ jobs:
           ${{ env.MAVEN_VERIFY_COMMAND }}
           ${{ env.MAVEN_BUILD_PROFILES }}
           ${{ env.MAVEN_PROJECTS }}
-      - name: Upload Test Reports
+      - name: Upload Test Results
+        if: success() || failure() || cancelled()
         uses: actions/upload-artifact@v3
         with:
-          name: surefire-reports-ubuntu-21
+          name: test-results-ubuntu-en
           path: |
             ./**/target/surefire-reports/*.txt
             ./**/target/surefire-reports/*.xml
           retention-days: 3
-        if: failure()
       - name: Post Disk Usage
         run: df
         if: ${{ always() }}
@@ -239,15 +239,15 @@ jobs:
           ${{ env.MAVEN_VERIFY_COMMAND }}
           ${{ env.MAVEN_BUILD_PROFILES }}
           ${{ env.MAVEN_PROJECTS }}
-      - name: Upload Test Reports
+      - name: Upload Test Results
+        if: success() || failure() || cancelled()
         uses: actions/upload-artifact@v3
         with:
-          name: surefire-reports-macos-jp
+          name: test-results-macos-jp
           path: |
             ./**/target/surefire-reports/*.txt
             ./**/target/surefire-reports/*.xml
           retention-days: 3
-        if: failure()
       - name: Post Disk Usage
         run: df
         if: ${{ always() }}
@@ -305,15 +305,15 @@ jobs:
           ${{ env.MAVEN_VERIFY_COMMAND }}
           ${{ env.MAVEN_BUILD_PROFILES }}
           ${{ env.MAVEN_PROJECTS }}
-      - name: Upload Test Reports
+      - name: Upload Test Results
+        if: always()
         uses: actions/upload-artifact@v3
         with:
-          name: surefire-reports-windows-fr
+          name: test-results-windows-fr
           path: |
             ./**/target/surefire-reports/*.txt
             ./**/target/surefire-reports/*.xml
           retention-days: 3
-        if: failure()
       - name: Post Disk Usage
         run: df
         if: ${{ always() }}

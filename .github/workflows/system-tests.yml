@@ -123,11 +123,11 @@ jobs:
           ${{ env.MAVEN_COMMAND }}
           ${{ env.MAVEN_RUN_ARGUMENTS }}
           ${{ env.MAVEN_PROJECTS }}
-      - name: Upload Troubleshooting Logs
-        if: failure() || cancelled()
+      - name: Upload Test Results
+        if: always()
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ matrix.os }}-${{ matrix.version }}-troubleshooting-logs
+          name: test-results-${{ matrix.os }}-${{ matrix.version }}
           path: |
             nifi-system-tests/nifi-system-test-suite/target/failsafe-reports/**/*.txt
             nifi-system-tests/nifi-system-test-suite/target/surefire-reports/**/*.txt

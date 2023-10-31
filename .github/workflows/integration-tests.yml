@@ -121,11 +121,12 @@ jobs:
           ${{ env.MAVEN_COMMAND }}
           ${{ env.MAVEN_BUILD_ARGUMENTS }}
           ${{ env.MAVEN_BUILD_EXCLUDE_PROJECTS }}
-      - name: Upload Troubleshooting Logs
-        if: failure() || cancelled()
+      - name: Upload Test Results
+        if: always()
         uses: actions/upload-artifact@v3
         with:
-          name: ubuntu-21-failsafe-logs
+          name: test-results-ubuntu-21
           path: |
-            **/target/failsafe-reports/**/*.txt
+            ./**/target/failsafe-reports/**/*.txt
+            ./**/target/failsafe-reports/**/*.xml
           retention-days: 7
