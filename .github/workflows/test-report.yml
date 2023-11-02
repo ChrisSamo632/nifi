@@ -39,6 +39,6 @@ jobs:
         with:
           artifact: /test-results-(.*)/
           name: Java Tests
-          path: '**/*.xml'
+          path: '**/target/*-reports/**/TEST-*.xml'
           reporter: java-junit
           max-annotations: '50'
