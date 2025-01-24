@@ -201,7 +201,7 @@ public class ElasticSearchLookupService extends JsonInferenceSchemaRegistryServi
 
         final String json = mapper.writeValueAsString(query);
 
-        final SearchResponse response = clientService.search(json, index, type, null, null);
+        final SearchResponse response = clientService.search(json, index, type, null);
         if (response.getNumberOfHits() > 1) {
             throw new LookupFailureException(String.format("Expected 1 response, got %d for query %s",
                 response.getNumberOfHits(), json));
@@ -209,12 +209,12 @@ public class ElasticSearchLookupService extends JsonInferenceSchemaRegistryServi
             return null;
         }
 
-        final Map<String, Object> source = (Map<String, Object>) response.getHits().get(0).get("_source");
+        final Map<String, Object> source = (Map<String, Object>) response.getHits().getFirst().get("_source");
 
         final RecordSchema toUse = getSchema(context, source, null);
 
         Record record = new MapRecord(toUse, source);
-        if (recordPathMappings.size() > 0) {
+        if (!recordPathMappings.isEmpty()) {
             record = applyMappings(record, source);
         }
 
@@ -239,7 +239,7 @@ public class ElasticSearchLookupService extends JsonInferenceSchemaRegistryServi
                                     put(e.getKey(), e.getValue());
                                 }});
                             }
-                        }}).collect(Collectors.toList())
+                        }}).toList()
                 );
             }});
         }};
@@ -252,14 +252,14 @@ public class ElasticSearchLookupService extends JsonInferenceSchemaRegistryServi
         try {
             final String json = mapper.writeValueAsString(buildQuery(query));
 
-            final SearchResponse response = clientService.search(json, index, type, null, null);
+            final SearchResponse response = clientService.search(json, index, type, null);
             if (response.getNumberOfHits() == 0) {
                 return null;
             } else {
-                final Map<String, Object> source = (Map<String, Object>) response.getHits().get(0).get("_source");
+                final Map<String, Object> source = (Map<String, Object>) response.getHits().getFirst().get("_source");
                 final RecordSchema toUse = getSchema(context, source, null);
                 Record record = new MapRecord(toUse, source);
-                if (recordPathMappings.size() > 0) {
+                if (!recordPathMappings.isEmpty()) {
                     record = applyMappings(record, source);
                 }
 
